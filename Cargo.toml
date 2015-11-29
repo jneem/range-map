@@ -1,5 +1,5 @@
 [package]
-name = "range-set"
+name = "range-map"
 version = "0.1.0"
 authors = ["Joe Neeman <joeneeman@gmail.com>"]
 
