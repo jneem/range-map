@@ -581,7 +581,7 @@ impl<T: Debug + PrimInt> RangeSet<T> {
     /// Returns the set of all characters that are not in this set.
     pub fn negated(&self) -> RangeSet<T> {
         let mut ret = Vec::with_capacity(self.num_ranges() + 1);
-        let mut last_end = T::max_value();
+        let mut last_end = T::min_value();
 
         for range in self.ranges() {
             if range.start > last_end {
@@ -635,6 +635,11 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
         self.elts.len()
     }
 
+    /// Checks if the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.elts.is_empty()
+    }
+
     /// Adds a new mapping from a range of characters to `value`.
     pub fn insert(&mut self, range: Range<T>, value: V) {
         self.elts.push((range, value));
@@ -664,10 +669,15 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
         RangeMultiMap::from_vec(ret)
     }
 
-    /// Returns a new `RangeMultiMap`, containing only those mappings with values `v` satisfying
-    /// `f(v)`.
-    pub fn filter_values<F>(&self, mut f: F) -> RangeMultiMap<T, V> where F: FnMut(&V) -> bool {
-        RangeMultiMap::from_vec(self.elts.iter().filter(|x| f(&x.1)).cloned().collect())
+    pub fn map_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> V {
+        for i in 0..self.elts.len() {
+            self.elts[i].1 = f(&self.elts[i].1);
+        }
+    }
+
+    /// Modifies this map in place to only contain mappings whose values `v` satisfy `f(v)`.
+    pub fn retain_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> bool {
+        self.elts.retain(|x| f(&x.1));
     }
 
     /// Splits the set of ranges into equal or disjoint ranges.
@@ -902,6 +912,7 @@ mod tests {
         let neg = set.negated();
         neg.elements().all(|e| !set.contains(e))
             && set.elements().all(|e| !neg.contains(e))
+            && neg.negated() == set
     }
 
     #[quickcheck]
@@ -915,7 +926,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn rangeset_except_unsorted() {
-        RangeSet::except([1i32, 3, 2].into_iter());
+        RangeSet::except([1i32, 3, 2].iter().cloned());
     }
 
     // TODO: test RangeMultiMap
