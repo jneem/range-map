@@ -680,45 +680,6 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
         self.elts.retain(|x| f(&x.1));
     }
 
-    /// Splits the set of ranges into equal or disjoint ranges.
-    ///
-    /// The output is a `RangeMultiMap` in which every pair of `Range`s are either identical or
-    /// disjoint.
-    fn split(&self) -> RangeMultiMap<T, V> {
-        let mut ret = RangeMultiMap::new();
-        let mut start_chars = Vec::new();
-
-        for &(ref range, _) in self.elts.iter() {
-            start_chars.push(range.start);
-            if range.end < T::max_value() {
-                start_chars.push(range.end + T::one());
-            }
-        }
-
-        start_chars.sort();
-        start_chars.dedup();
-
-        for &(range, ref state) in self.elts.iter() {
-            let mut idx = match start_chars.binary_search(&range.start) {
-                Ok(i) => i+1,
-                Err(i) => i,
-            };
-            let mut last = range.start;
-            loop {
-                if idx >= start_chars.len() || start_chars[idx] > range.end {
-                    ret.elts.push((Range::new(last, range.end), state.clone()));
-                    break;
-                } else {
-                    ret.elts.push((Range::new(last, start_chars[idx] - T::one()), state.clone()));
-                    last = start_chars[idx];
-                    idx += 1;
-                }
-            }
-        }
-
-        ret
-    }
-
     /// Returns the underlying `Vec`.
     pub fn into_vec(self) -> Vec<(Range<T>, V)> {
         self.elts
@@ -735,25 +696,50 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
     /// Makes the ranges sorted and non-overlapping. The data associated with each range will
     /// be a sorted `Vec<T>` instead of a single `T`.
     pub fn group(&self) -> RangeMap<T, Vec<V>> {
-        let mut split = self.split().elts;
-        split.sort();
-        split.dedup();
-
-        let mut vec: Vec<(Range<T>, Vec<V>)> = Vec::new();
-        let grouped = split.into_iter().group_by_lazy(|&(range, _)| range);
-        for (range, pairs) in grouped.into_iter() {
-            let val_vec: Vec<_> = pairs.map(|x| x.1).collect();
-            vec.push((range, val_vec));
+        if self.elts.is_empty() {
+            return RangeMap::new();
         }
-        RangeMap::from_sorted_vec(vec)
+
+        let mut start_chars = Vec::with_capacity(self.elts.len() * 2);
+
+        for &(ref range, _) in self.elts.iter() {
+            start_chars.push(range.start);
+            if range.end < T::max_value() {
+                start_chars.push(range.end + T::one());
+            }
+        }
+        start_chars.sort();
+        start_chars.dedup();
+
+        let mut ret: Vec<(Range<T>, Vec<V>)> = Vec::with_capacity(start_chars.len());
+        for pair in start_chars.windows(2) {
+            ret.push((Range::new(pair[0], pair[1] - T::one()), Vec::new()));
+        }
+        ret.push((Range::new(*start_chars.last().unwrap(), T::max_value()), Vec::new()));
+        for &(range, ref val) in self.elts.iter() {
+            // The unwrap is OK because start_chars contains range.start for every range in elts.
+            let mut idx = start_chars.binary_search(&range.start).unwrap();
+            while idx < start_chars.len() && start_chars[idx] <= range.end {
+                ret[idx].1.push(val.clone());
+                idx += 1;
+            }
+        }
+        ret.retain(|x| !x.1.is_empty());
+        for pair in &mut ret {
+            pair.1.sort();
+            pair.1.dedup();
+        }
+        RangeMap::from_sorted_vec(ret)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use num::iter::range_inclusive;
     use num::traits::PrimInt;
     use std::cmp::{max, min};
     use std::fmt::Debug;
+    use std::i32;
     use std::ops::Add;
     use super::*;
     use quickcheck::{Arbitrary, Gen, TestResult};
@@ -929,6 +915,33 @@ mod tests {
         RangeSet::except([1i32, 3, 2].iter().cloned());
     }
 
-    // TODO: test RangeMultiMap
+    // Check that things don't panic when we have MIN and MAX in the ranges (quickcheck doesn't
+    // check this properly).
+    #[test]
+    fn rangemultimap_boundaries() {
+        assert_eq!(
+            RangeMultiMap::from_vec(vec![
+                (Range::new(i32::MIN, 200), 5),
+                (Range::new(100, i32::MAX), 10),
+            ]).group(),
+            RangeMap::from_sorted_vec(vec![
+                (Range::new(i32::MIN, 99), vec![5]),
+                (Range::new(100, 200), vec![5, 10]),
+                (Range::new(201, i32::MAX), vec![10]),
+            ])
+        );
+    }
+
+    #[quickcheck]
+    fn rangemultimap_group(mm_vec: Vec<(Range<i32>, i32)>) -> bool {
+        let mm = RangeMultiMap::from_vec(mm_vec.clone());
+        let grouped = mm.group();
+        mm_vec.into_iter()
+            .all(|(range, val)| {
+                range_inclusive(range.start, range.end).all(|i| {
+                    grouped.get(i).unwrap().contains(&val)
+                })
+            })
+    }
 }
 
