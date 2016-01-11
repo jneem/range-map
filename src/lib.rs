@@ -6,9 +6,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(test, feature(plugin))]
-#![cfg_attr(test, plugin(quickcheck_macros))]
-
 extern crate itertools;
 extern crate num;
 
@@ -742,7 +739,7 @@ mod tests {
     use std::i32;
     use std::ops::Add;
     use super::*;
-    use quickcheck::{Arbitrary, Gen, TestResult};
+    use quickcheck::{Arbitrary, Gen, TestResult, quickcheck};
 
     impl<T: Arbitrary + Debug + PrimInt> Arbitrary for Range<T> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
@@ -786,18 +783,24 @@ mod tests {
         }
     }
 
-    #[quickcheck]
-    fn range_intersects_intersection(r1: Range<i32>, r2: Range<i32>) -> bool {
-        r1.intersection(&r2).is_some() == r1.intersects(&r2)
+    #[test]
+    fn range_intersects_intersection() {
+        fn prop(r1: Range<i32>, r2: Range<i32>) -> bool {
+            r1.intersection(&r2).is_some() == r1.intersects(&r2)
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
-    #[quickcheck]
-    fn range_intersection_contains(r1: Range<i32>, r2: Range<i32>, x: i32) -> TestResult {
-        if let Some(r) = r1.intersection(&r2) {
-            TestResult::from_bool(r.contains(x) == (r1.contains(x) && r2.contains(x)))
-        } else {
-            TestResult::discard()
+    #[test]
+    fn range_intersection_contains() {
+        fn prop(r1: Range<i32>, r2: Range<i32>, x: i32) -> TestResult {
+            if let Some(r) = r1.intersection(&r2) {
+                TestResult::from_bool(r.contains(x) == (r1.contains(x) && r2.contains(x)))
+            } else {
+                TestResult::discard()
+            }
         }
+        quickcheck(prop as fn(_, _, _) -> _);
     }
 
     #[test]
@@ -806,9 +809,12 @@ mod tests {
         map(vec![(5, 1, 1), (6, 10, 2)]);
     }
 
-    #[quickcheck]
-    fn range_intersection_cover(r1: Range<i32>, r2: Range<i32>) -> bool {
-        r1 == r1.cover(&r2).intersection(&r1).unwrap()
+    #[test]
+    fn range_intersection_cover() {
+        fn prop(r1: Range<i32>, r2: Range<i32>) -> bool {
+            r1 == r1.cover(&r2).intersection(&r1).unwrap()
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
     fn map(vec: Vec<(i32, i32, i32)>) -> RangeMap<i32, i32> {
@@ -830,83 +836,119 @@ mod tests {
         map(vec![(1, 5, 1), (5, 10, 2)]);
     }
 
-    #[quickcheck]
-    fn rangemap_intersection(map: RangeMap<i32, i32>, set: RangeSet<i32>) -> bool {
-        let int = map.intersection(&set);
-        set.elements().all(|x| map.get(x) == int.get(x))
-            && int.keys_values().all(|x| set.contains(x.0))
+    #[test]
+    fn rangemap_intersection() {
+        fn prop(map: RangeMap<i32, i32>, set: RangeSet<i32>) -> bool {
+            let int = map.intersection(&set);
+            set.elements().all(|x| map.get(x) == int.get(x))
+                && int.keys_values().all(|x| set.contains(x.0))
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
-    #[quickcheck]
-    fn rangemap_num_ranges(map: RangeMap<i32, i32>) -> bool {
-        map.num_ranges() == map.ranges_values().count()
+    #[test]
+    fn rangemap_num_ranges() {
+        fn prop(map: RangeMap<i32, i32>) -> bool {
+            map.num_ranges() == map.ranges_values().count()
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
-    #[quickcheck]
-    fn rangemap_num_keys(map: RangeMap<i32, i32>) -> bool {
-        map.num_keys() == map.keys_values().count()
+    #[test]
+    fn rangemap_num_keys() {
+        fn prop(map: RangeMap<i32, i32>) -> bool {
+            map.num_keys() == map.keys_values().count()
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
-    #[quickcheck]
-    fn rangemap_map_values(map: RangeMap<i32, i32>, x: i32) -> bool {
-        let mut new_map = map.clone();
-        new_map.map_values(|y| x + y);
-        new_map.keys_values().all(|(k, v)| map.get(k).unwrap() + x == *v)
-            && map.keys_values().all(|(k, v)| new_map.get(k).unwrap() - x == *v)
+    #[test]
+    fn rangemap_map_values() {
+        fn prop(map: RangeMap<i32, i32>, x: i32) -> bool {
+            let mut new_map = map.clone();
+            new_map.map_values(|y| x + y);
+            new_map.keys_values().all(|(k, v)| map.get(k).unwrap() + x == *v)
+                && map.keys_values().all(|(k, v)| new_map.get(k).unwrap() - x == *v)
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
-    #[quickcheck]
-    fn rangemap_retain_values(map: RangeMap<i32, i32>, r: Range<i32>) -> bool {
-        let mut new_map = map.clone();
-        new_map.retain_values(|v| r.contains(*v));
-        new_map.keys_values().all(|(_, v)| r.contains(*v))
-            && map.keys_values().all(|(k, v)| !r.contains(*v) || new_map.get(k).unwrap() == v)
+    #[test]
+    fn rangemap_retain_values() {
+        fn prop(map: RangeMap<i32, i32>, r: Range<i32>) -> bool {
+            let mut new_map = map.clone();
+            new_map.retain_values(|v| r.contains(*v));
+            new_map.keys_values().all(|(_, v)| r.contains(*v))
+                && map.keys_values().all(|(k, v)| !r.contains(*v) || new_map.get(k).unwrap() == v)
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_contains(set: RangeSet<i32>) -> bool {
-        set.elements().all(|e| set.contains(e))
+    #[test]
+    fn rangeset_contains() {
+        fn prop(set: RangeSet<i32>) -> bool {
+            set.elements().all(|e| set.contains(e))
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_num_ranges(set: RangeSet<i32>) -> bool {
-        set.num_ranges() == set.ranges().count()
+    #[test]
+    fn rangeset_num_ranges() {
+        fn prop(set: RangeSet<i32>) -> bool {
+            set.num_ranges() == set.ranges().count()
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_num_elements(set: RangeSet<i32>) -> bool {
-        set.num_elements() == set.elements().count()
+    #[test]
+    fn rangeset_num_elements() {
+        fn prop(set: RangeSet<i32>) -> bool {
+            set.num_elements() == set.elements().count()
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_union(s1: RangeSet<i32>, s2: RangeSet<i32>) -> bool {
-        let un = s1.union(&s2);
-        un.elements().all(|e| s1.contains(e) || s2.contains(e))
-            && s1.elements().all(|e| un.contains(e))
-            && s2.elements().all(|e| un.contains(e))
+    #[test]
+    fn rangeset_union() {
+        fn prop(s1: RangeSet<i32>, s2: RangeSet<i32>) -> bool {
+            let un = s1.union(&s2);
+            un.elements().all(|e| s1.contains(e) || s2.contains(e))
+                && s1.elements().all(|e| un.contains(e))
+                && s2.elements().all(|e| un.contains(e))
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_intersection(s1: RangeSet<i32>, s2: RangeSet<i32>) -> bool {
-        let int = s1.intersection(&s2);
-        int.elements().all(|e| s1.contains(e) && s2.contains(e))
-            && s1.elements().all(|e| int.contains(e) == s2.contains(e))
+    #[test]
+    fn rangeset_intersection() {
+        fn prop(s1: RangeSet<i32>, s2: RangeSet<i32>) -> bool {
+            let int = s1.intersection(&s2);
+            int.elements().all(|e| s1.contains(e) && s2.contains(e))
+                && s1.elements().all(|e| int.contains(e) == s2.contains(e))
+        }
+        quickcheck(prop as fn(_, _) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_negate(set: RangeSet<i8>) -> bool {
-        let neg = set.negated();
-        neg.elements().all(|e| !set.contains(e))
-            && set.elements().all(|e| !neg.contains(e))
-            && neg.negated() == set
+    #[test]
+    fn rangeset_negate() {
+        fn prop(set: RangeSet<i8>) -> bool {
+            let neg = set.negated();
+            neg.elements().all(|e| !set.contains(e))
+                && set.elements().all(|e| !neg.contains(e))
+                && neg.negated() == set
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
-    #[quickcheck]
-    fn rangeset_except(mut except: Vec<i8>) -> bool {
-        except.sort();
-        let set = RangeSet::except(except.iter().cloned());
-        set.elements().all(|e| except.binary_search(&e).is_err())
-            && except.iter().all(|&e| !set.contains(e))
+    #[test]
+    fn rangeset_except() {
+        fn prop(mut except: Vec<i8>) -> bool {
+            except.sort();
+            let set = RangeSet::except(except.iter().cloned());
+            set.elements().all(|e| except.binary_search(&e).is_err())
+                && except.iter().all(|&e| !set.contains(e))
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 
     #[test]
@@ -932,16 +974,19 @@ mod tests {
         );
     }
 
-    #[quickcheck]
-    fn rangemultimap_group(mm_vec: Vec<(Range<i32>, i32)>) -> bool {
-        let mm = RangeMultiMap::from_vec(mm_vec.clone());
-        let grouped = mm.group();
-        mm_vec.into_iter()
-            .all(|(range, val)| {
-                range_inclusive(range.start, range.end).all(|i| {
-                    grouped.get(i).unwrap().contains(&val)
+    #[test]
+    fn rangemultimap_group() {
+        fn prop(mm_vec: Vec<(Range<i32>, i32)>) -> bool {
+            let mm = RangeMultiMap::from_vec(mm_vec.clone());
+            let grouped = mm.group();
+            mm_vec.into_iter()
+                .all(|(range, val)| {
+                    range_inclusive(range.start, range.end).all(|i| {
+                        grouped.get(i).unwrap().contains(&val)
+                    })
                 })
-            })
+        }
+        quickcheck(prop as fn(_) -> _);
     }
 }
 
