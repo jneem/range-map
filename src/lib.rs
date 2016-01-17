@@ -300,6 +300,10 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
         for &mut (_, ref mut data) in &mut self.elts {
             *data = f(data);
         }
+
+        // We need to re-normalize, because we might have mapped two adjacent ranges to the same
+        // value.
+        self.normalize();
     }
 
     /// Modifies this map to contain only those mappings with values `v` satisfying `f(v)`.
@@ -865,10 +869,21 @@ mod tests {
     #[test]
     fn rangemap_map_values() {
         fn prop(map: RangeMap<i32, i32>, x: i32) -> bool {
-            let mut new_map = map.clone();
-            new_map.map_values(|y| x + y);
-            new_map.keys_values().all(|(k, v)| map.get(k).unwrap() + x == *v)
-                && map.keys_values().all(|(k, v)| new_map.get(k).unwrap() - x == *v)
+            let f = |y: &i32| (x + *y) % 10;
+            let new_map = {
+                let mut new_map = map.clone();
+                new_map.map_values(&f);
+                new_map
+            };
+            let new_map_norm = {
+                let mut new_map_norm = new_map.clone();
+                new_map_norm.normalize();
+                new_map_norm
+            };
+
+            new_map.keys_values().all(|(k, v)| f(map.get(k).unwrap()) == *v)
+                && map.keys_values().all(|(k, v)| *new_map.get(k).unwrap() == f(v))
+                && new_map == new_map_norm
         }
         quickcheck(prop as fn(_, _) -> _);
     }
