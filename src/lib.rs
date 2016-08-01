@@ -6,14 +6,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-extern crate itertools;
-extern crate num;
+extern crate num_traits;
 
 #[cfg(test)]
 extern crate quickcheck;
+#[cfg(test)]
+extern crate num_iter;
 
-use itertools::Itertools;
-use num::traits::PrimInt;
+use num_traits::PrimInt;
 use std::cmp::{max, min, Ordering};
 use std::fmt::{Debug, Formatter};
 use std::iter::FromIterator;
@@ -736,8 +736,8 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
 
 #[cfg(test)]
 mod tests {
-    use num::iter::range_inclusive;
-    use num::traits::PrimInt;
+    use num_iter::range_inclusive;
+    use num_traits::PrimInt;
     use std::cmp::{max, min};
     use std::fmt::Debug;
     use std::i32;
