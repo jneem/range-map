@@ -152,11 +152,11 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
         }
     }
 
-    // Creates a `RangeMap` from a `Vec`, which must contain ranges in ascending order. If any
-    // ranges overlap, they must map to the same value.
-    //
-    // Panics if the ranges are not sorted, or if they overlap without mapping to the same value.
-    fn from_sorted_vec(vec: Vec<(Range<T>, V)>) -> RangeMap<T, V> {
+    /// Creates a `RangeMap` from a `Vec`, which must contain ranges in ascending order. If any
+    /// ranges overlap, they must map to the same value.
+    ///
+    /// Panics if the ranges are not sorted, or if they overlap without mapping to the same value.
+    pub fn from_sorted_vec(vec: Vec<(Range<T>, V)>) -> RangeMap<T, V> {
         let mut ret = RangeMap { elts: vec };
         ret.normalize();
         ret
