@@ -695,7 +695,7 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
 
 impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
     /// Makes the ranges sorted and non-overlapping. The data associated with each range will
-    /// be a sorted `Vec<T>` instead of a single `T`.
+    /// be a `Vec<T>` instead of a single `T`.
     pub fn group(&self) -> RangeMap<T, Vec<V>> {
         if self.elts.is_empty() {
             return RangeMap::new();
@@ -726,10 +726,6 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
             }
         }
         ret.retain(|x| !x.1.is_empty());
-        for pair in &mut ret {
-            pair.1.sort();
-            pair.1.dedup();
-        }
         RangeMap::from_sorted_vec(ret)
     }
 }

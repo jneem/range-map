@@ -1,6 +1,6 @@
 [package]
 name = "range-map"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["Joe Neeman <joeneeman@gmail.com>"]
 description = "Maps and sets implemented using ranges."
 documentation = "http://jneem.github.io/range-map"
