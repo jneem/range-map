@@ -310,6 +310,16 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     pub fn retain_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> bool {
         self.elts.retain(|x| f(&x.1));
     }
+
+    /// Returns a mutable view into this map.
+    ///
+    /// The ranges should not be modified, since that might violate our invariants.
+    ///
+    /// This method will eventually be removed, probably once anonymous return values allow is to
+    /// write a values_mut() iterator more easily.
+    pub fn as_mut_slice(&mut self) -> &mut [(Range<T>, V)] {
+        &mut self.elts
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -602,6 +612,13 @@ impl<T: Debug + PrimInt> RangeSet<T> {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct RangeMultiMap<T, V> {
     elts: Vec<(Range<T>, V)>,
+}
+
+impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> FromIterator<(Range<T>, V)> for RangeMultiMap<T, V> {
+    /// Builds a `RangeMultiMap` from an iterator over `Range` and values..
+    fn from_iter<I: IntoIterator<Item=(Range<T>, V)>>(iter: I) -> Self {
+        RangeMultiMap::from_vec(iter.into_iter().collect())
+    }
 }
 
 impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> Debug for RangeMultiMap<T, V> {
