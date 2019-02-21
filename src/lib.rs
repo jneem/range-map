@@ -9,9 +9,9 @@
 extern crate num_traits;
 
 #[cfg(test)]
-extern crate quickcheck;
-#[cfg(test)]
 extern crate num_iter;
+#[cfg(test)]
+extern crate quickcheck;
 
 use num_traits::PrimInt;
 use std::cmp::{max, min, Ordering};
@@ -46,12 +46,18 @@ impl<T: PrimInt> Range<T> {
         if start > end {
             panic!("Ranges must be ordered");
         }
-        Range { start: start, end: end }
+        Range {
+            start: start,
+            end: end,
+        }
     }
 
     /// Creates a new range containing everything.
     pub fn full() -> Range<T> {
-        Range { start: T::min_value(), end: T::max_value() }
+        Range {
+            start: T::min_value(),
+            end: T::max_value(),
+        }
     }
 
     /// Creates a new range containing a single thing.
@@ -72,7 +78,10 @@ impl<T: PrimInt> Range<T> {
     /// Computes the intersection between two ranges. Returns none if the intersection is empty.
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         if self.intersects(other) {
-            Some(Range::new(max(self.start, other.start), min(self.end, other.end)))
+            Some(Range::new(
+                max(self.start, other.start),
+                min(self.end, other.end),
+            ))
         } else {
             None
         }
@@ -102,6 +111,19 @@ impl<T: PrimInt> PartialOrd<T> for Range<T> {
     }
 }
 
+/// When creating a [`RangeMap`] from a list of ranges and values, there's a possiblity that two
+/// ranges will overlap. In this case, it's a problem if they want to be associated to different
+/// values (because we don't know which value should be assigned to the intersection of the
+/// ranges). An `OverlapError` is the result of such a situation. It contains two members. The
+/// first is a [`RangeMap`] obtained by simply ignoring all the ranges that would cause a bad
+/// overlap. The second is the collection of ranges that were ignored.
+// TODO: an example
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct OverlapError<T, V> {
+    pub non_overlapping: RangeMap<T, V>,
+    pub discarded: Vec<(Range<T>, V)>,
+}
+
 /// A set of characters. Optionally, each character in the set may be associated with some data.
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct RangeMap<T, V> {
@@ -109,21 +131,23 @@ pub struct RangeMap<T, V> {
 }
 
 impl<T: Debug, V: Debug> Debug for RangeMap<T, V> {
-    // When alternate formatting is specified, only prints out the first buch of mappings.
+    // When alternate formatting is specified, only prints out the first bunch of mappings.
     fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
         try!(f.write_fmt(format_args!("RangeMap (")));
 
         if f.alternate() {
-            try!(f.debug_map()
-                 .entries(self.elts.iter().map(|x| (&x.0, &x.1)).take(DISPLAY_LIMIT))
-                 .finish());
+            try!(f
+                .debug_map()
+                .entries(self.elts.iter().map(|x| (&x.0, &x.1)).take(DISPLAY_LIMIT))
+                .finish());
             if self.elts.len() > DISPLAY_LIMIT {
                 try!(f.write_str("..."));
             }
         } else {
-            try!(f.debug_map()
-                 .entries(self.elts.iter().map(|x| (&x.0, &x.1)))
-                 .finish());
+            try!(f
+                .debug_map()
+                .entries(self.elts.iter().map(|x| (&x.0, &x.1)))
+                .finish());
         }
         try!(f.write_str(")"));
         Ok(())
@@ -135,28 +159,44 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> FromIterator<(Range<T>, V)> for 
     /// the same value.
     ///
     /// # Panics
-    ///  - if there are ranges that overlap and do not map to the same value.
-    fn from_iter<I: IntoIterator<Item=(Range<T>, V)>>(iter: I) -> Self {
-        let mut vec: Vec<_> = iter.into_iter().collect();
-        vec.sort_by(|x, y| x.0.cmp(&y.0));
-
-        RangeMap::from_sorted_vec(vec)
+    /// Panics if there are ranges that overlap and do not map to the same value. If you are not
+    /// sure whether this could happen, use [`RangeMap::try_from_iter`] instead.
+    fn from_iter<I: IntoIterator<Item = (Range<T>, V)>>(iter: I) -> Self {
+        RangeMap::try_from_iter(iter).ok().unwrap()
     }
 }
 
 impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     /// Creates a new empty `RangeMap`.
     pub fn new() -> RangeMap<T, V> {
-        RangeMap {
-            elts: Vec::new(),
+        RangeMap { elts: Vec::new() }
+    }
+
+    /// Builds a `RangeMap` from an iterator over pairs. If any ranges overlap, they should map to
+    /// the same value. If not, returns an [`OverlapError`].
+    pub fn try_from_iter<I: IntoIterator<Item = (Range<T>, V)>>(
+        iter: I,
+    ) -> Result<RangeMap<T, V>, OverlapError<T, V>> {
+        let mut vec: Vec<_> = iter.into_iter().collect();
+        vec.sort_by(|x, y| x.0.cmp(&y.0));
+        let mut ret = RangeMap { elts: vec };
+        let discarded = ret.normalize();
+
+        if discarded.is_empty() {
+            Ok(ret)
+        } else {
+            Err(OverlapError {
+                non_overlapping: ret,
+                discarded: discarded,
+            })
         }
     }
 
-    /// Creates a `RangeMap` from a `Vec`, which must contain ranges in ascending order. If any
-    /// ranges overlap, they must map to the same value.
-    ///
-    /// Panics if the ranges are not sorted, or if they overlap without mapping to the same value.
-    pub fn from_sorted_vec(vec: Vec<(Range<T>, V)>) -> RangeMap<T, V> {
+    // Creates a `RangeMap` from a `Vec`, which must contain ranges in ascending order. If any
+    // ranges overlap, they must map to the same value.
+    //
+    // Panics if the ranges are not sorted, or if they overlap without mapping to the same value.
+    fn from_sorted_vec(vec: Vec<(Range<T>, V)>) -> RangeMap<T, V> {
         let mut ret = RangeMap { elts: vec };
         ret.normalize();
         ret
@@ -167,15 +207,25 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     // Panics unless `vec` is sorted and normalized.
     fn from_norm_vec(vec: Vec<(Range<T>, V)>) -> RangeMap<T, V> {
         for i in 1..vec.len() {
-            if vec[i].0.start <= vec[i-1].0.end {
-                panic!("vector {:?} has overlapping ranges {:?} and {:?}", vec, vec[i-1], vec[i]);
+            if vec[i].0.start <= vec[i - 1].0.end {
+                panic!(
+                    "vector {:?} has overlapping ranges {:?} and {:?}",
+                    vec,
+                    vec[i - 1],
+                    vec[i]
+                );
             }
             // If vec[i-1].0.end is T::max_value() then we've already panicked, so the unwrap is
             // safe.
-            if vec[i].0.start == vec[i-1].0.end.checked_add(&T::one()).unwrap()
-                    && vec[i].1 == vec[i-1].1 {
-                panic!("vector {:?} has adjacent ranges with same value {:?} and {:?}",
-                    vec, vec[i-1], vec[i]);
+            if vec[i].0.start == vec[i - 1].0.end.checked_add(&T::one()).unwrap()
+                && vec[i].1 == vec[i - 1].1
+            {
+                panic!(
+                    "vector {:?} has adjacent ranges with same value {:?} and {:?}",
+                    vec,
+                    vec[i - 1],
+                    vec[i]
+                );
             }
         }
 
@@ -212,11 +262,15 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     }
 
     /// Iterates over all mappings.
-    pub fn keys_values<'a> (&'a self) -> PairIter<'a, T, V> {
+    pub fn keys_values<'a>(&'a self) -> PairIter<'a, T, V> {
         PairIter {
             map: self,
             next_range_idx: if self.is_empty() { None } else { Some(0) },
-            next_key: if self.is_empty() { T::min_value() } else { self.elts[0].0.start },
+            next_key: if self.is_empty() {
+                T::min_value()
+            } else {
+                self.elts[0].0.start
+            },
         }
     }
 
@@ -236,16 +290,20 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     // If there are any overlapping ranges that map to the same data, merges them. Assumes that the
     // ranges are sorted according to their start.
     //
-    // Panics if there are overlapping ranges that map to different values.
-    fn normalize(&mut self) {
+    // If there are overlapping ranges that map to different values, we delete them. The return
+    // value is the collection of all ranges that were deleted.
+    //
+    // TODO: because the output is always smaller than the input, this could be done in-place.
+    fn normalize(&mut self) -> Vec<(Range<T>, V)> {
         let mut vec = Vec::with_capacity(self.elts.len());
+        let mut discarded = Vec::new();
         mem::swap(&mut vec, &mut self.elts);
 
         for (range, val) in vec.into_iter() {
             if let Some(&mut (ref mut last_range, ref last_val)) = self.elts.last_mut() {
                 if range.start <= last_range.end && &val != last_val {
-                    panic!("overlapping ranges {:?} and {:?} map to values {:?} and {:?}",
-                           last_range, range, last_val, val);
+                    discarded.push((range, val));
+                    continue;
                 }
 
                 if range.start <= last_range.end.saturating_add(T::one()) && &val == last_val {
@@ -256,6 +314,8 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
 
             self.elts.push((range, val));
         }
+
+        discarded
     }
 
     /// Returns those mappings whose keys belong to the given set.
@@ -285,8 +345,12 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     /// This saturates at `usize::MAX`.
     pub fn num_keys(&self) -> usize {
         self.ranges_values().fold(0, |acc, range| {
-            acc.saturating_add((range.0.end - range.0.start).to_usize().unwrap_or(usize::MAX))
-               .saturating_add(1)
+            acc.saturating_add(
+                (range.0.end - range.0.start)
+                    .to_usize()
+                    .unwrap_or(usize::MAX),
+            )
+            .saturating_add(1)
         })
     }
 
@@ -296,7 +360,10 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     }
 
     /// Modifies the values in place.
-    pub fn map_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> V {
+    pub fn map_values<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&V) -> V,
+    {
         for &mut (_, ref mut data) in &mut self.elts {
             *data = f(data);
         }
@@ -307,7 +374,10 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Eq> RangeMap<T, V> {
     }
 
     /// Modifies this map to contain only those mappings with values `v` satisfying `f(v)`.
-    pub fn retain_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> bool {
+    pub fn retain_values<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&V) -> bool,
+    {
         self.elts.retain(|x| f(&x.1));
     }
 
@@ -411,7 +481,10 @@ impl<T: Debug + PrimInt> Debug for RangeSet<T> {
         try!(f.write_fmt(format_args!("RangeSet (")));
 
         if f.alternate() {
-            try!(f.debug_set().entries(self.ranges().take(DISPLAY_LIMIT)).finish());
+            try!(f
+                .debug_set()
+                .entries(self.ranges().take(DISPLAY_LIMIT))
+                .finish());
             if self.num_ranges() > DISPLAY_LIMIT {
                 try!(f.write_str("..."));
             }
@@ -425,9 +498,14 @@ impl<T: Debug + PrimInt> Debug for RangeSet<T> {
 
 impl<T: Debug + PrimInt> FromIterator<Range<T>> for RangeSet<T> {
     /// Builds a `RangeSet` from an iterator over `Range`s.
-    fn from_iter<I: IntoIterator<Item=Range<T>>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = Range<T>>>(iter: I) -> Self {
         RangeSet {
-            map: iter.into_iter().map(|x| (x, ())).collect()
+            // The unwrap here is ok because RangeMap::try_from_iter only fails when two
+            // overlapping ranges map to different values. Since every range here maps to the same
+            // value, (i.e.  ()), this will never happen.
+            map: RangeMap::try_from_iter(iter.into_iter().map(|x| (x, ())))
+                .ok()
+                .unwrap(),
         }
     }
 }
@@ -435,7 +513,9 @@ impl<T: Debug + PrimInt> FromIterator<Range<T>> for RangeSet<T> {
 impl<T: Debug + PrimInt> RangeSet<T> {
     /// Creates a new empty `RangeSet`.
     pub fn new() -> RangeSet<T> {
-        RangeSet { map: RangeMap::new() }
+        RangeSet {
+            map: RangeMap::new(),
+        }
     }
 
     /// Tests if this set is empty.
@@ -472,7 +552,11 @@ impl<T: Debug + PrimInt> RangeSet<T> {
     /// Returns an iterator over all elements in this set.
     pub fn elements<'a>(&'a self) -> EltIter<'a, T> {
         if self.map.elts.is_empty() {
-            EltIter { set: self, next_range_idx: None, next_elt: T::min_value() }
+            EltIter {
+                set: self,
+                next_range_idx: None,
+                next_elt: T::min_value(),
+            }
         } else {
             EltIter {
                 set: self,
@@ -490,13 +574,17 @@ impl<T: Debug + PrimInt> RangeSet<T> {
     // Creates a RangeSet from a vector. The vector must be sorted, but it does not need to be
     // normalized.
     fn from_sorted_vec(vec: Vec<(Range<T>, ())>) -> RangeSet<T> {
-        RangeSet { map: RangeMap::from_sorted_vec(vec) }
+        RangeSet {
+            map: RangeMap::from_sorted_vec(vec),
+        }
     }
 
     // Creates a RangeSet from a vector. The vector must be normalized, in the sense that it should
     // contain no adjacent ranges.
     fn from_norm_vec(vec: Vec<(Range<T>, ())>) -> RangeSet<T> {
-        RangeSet { map: RangeMap::from_norm_vec(vec) }
+        RangeSet {
+            map: RangeMap::from_norm_vec(vec),
+        }
     }
 
     /// Returns the union between `self` and `other`.
@@ -515,8 +603,16 @@ impl<T: Debug + PrimInt> RangeSet<T> {
         let mut cur_range: Option<Range<T>> = None;
 
         while r1.is_some() || r2.is_some() {
-            let r1_start = if let Some(&(r, _)) = r1 { r.start } else { T::max_value() };
-            let r2_start = if let Some(&(r, _)) = r2 { r.start } else { T::max_value() };
+            let r1_start = if let Some(&(r, _)) = r1 {
+                r.start
+            } else {
+                T::max_value()
+            };
+            let r2_start = if let Some(&(r, _)) = r2 {
+                r.start
+            } else {
+                T::max_value()
+            };
             if let Some(cur) = cur_range {
                 if min(r1_start, r2_start) > cur.end.saturating_add(T::one()) {
                     ret.push((cur_range.unwrap(), ()));
@@ -558,11 +654,9 @@ impl<T: Debug + PrimInt> RangeSet<T> {
         RangeSet::from_norm_vec(vec![(Range::single(x), ())])
     }
 
-    /// Creates a set containing all elements except the given ones.
-    ///
-    /// # Panics
-    ///  - if `chars` is not sorted or not unique.
-    pub fn except<I: Iterator<Item=T>>(it: I) -> RangeSet<T> {
+    /// Creates a set containing all elements except the given ones. The input iterator must be
+    /// sorted. If it is not, this will return `None`.
+    pub fn except<I: Iterator<Item = T>>(it: I) -> Option<RangeSet<T>> {
         let mut ret = Vec::new();
         let mut next_allowed = T::min_value();
         let mut last_forbidden = T::max_value();
@@ -571,7 +665,7 @@ impl<T: Debug + PrimInt> RangeSet<T> {
             if i > next_allowed {
                 ret.push((Range::new(next_allowed, i - T::one()), ()));
             } else if i < next_allowed.saturating_sub(T::one()) {
-                panic!("input to RangeSet::except must be sorted");
+                return None;
             }
 
             last_forbidden = i;
@@ -581,12 +675,14 @@ impl<T: Debug + PrimInt> RangeSet<T> {
         if last_forbidden < T::max_value() {
             ret.push((Range::new(last_forbidden + T::one(), T::max_value()), ()));
         }
-        RangeSet::from_norm_vec(ret)
+        Some(RangeSet::from_norm_vec(ret))
     }
 
     /// Finds the intersection between this set and `other`.
     pub fn intersection(&self, other: &RangeSet<T>) -> RangeSet<T> {
-        RangeSet { map: self.map.intersection(other) }
+        RangeSet {
+            map: self.map.intersection(other),
+        }
     }
 
     /// Returns the set of all characters that are not in this set.
@@ -614,9 +710,11 @@ pub struct RangeMultiMap<T, V> {
     elts: Vec<(Range<T>, V)>,
 }
 
-impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> FromIterator<(Range<T>, V)> for RangeMultiMap<T, V> {
+impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> FromIterator<(Range<T>, V)>
+    for RangeMultiMap<T, V>
+{
     /// Builds a `RangeMultiMap` from an iterator over `Range` and values..
-    fn from_iter<I: IntoIterator<Item=(Range<T>, V)>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = (Range<T>, V)>>(iter: I) -> Self {
         RangeMultiMap::from_vec(iter.into_iter().collect())
     }
 }
@@ -626,14 +724,20 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> Debug for RangeMultiMap<T
         try!(f.write_fmt(format_args!("RangeMultiMap (")));
 
         if f.alternate() {
-            try!(f.debug_map()
-                .entries(self.ranges_values().map(|x| (&x.0, &x.1)).take(DISPLAY_LIMIT))
+            try!(f
+                .debug_map()
+                .entries(
+                    self.ranges_values()
+                        .map(|x| (&x.0, &x.1))
+                        .take(DISPLAY_LIMIT)
+                )
                 .finish());
             if self.num_ranges() > DISPLAY_LIMIT {
                 try!(f.write_str("..."));
             }
         } else {
-            try!(f.debug_set()
+            try!(f
+                .debug_set()
                 .entries(self.ranges_values().map(|x| (&x.0, &x.1)))
                 .finish());
         }
@@ -673,7 +777,9 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
     pub fn intersection(&self, other: &RangeSet<T>) -> RangeMultiMap<T, V> {
         let mut ret = Vec::new();
         for &(ref my_range, ref data) in &self.elts {
-            let start_idx = other.map.elts
+            let start_idx = other
+                .map
+                .elts
                 .binary_search_by(|r| r.0.end.cmp(&my_range.start))
                 .unwrap_or_else(|x| x);
             for &(ref other_range, _) in &other.map.elts[start_idx..] {
@@ -687,14 +793,20 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
         RangeMultiMap::from_vec(ret)
     }
 
-    pub fn map_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> V {
+    pub fn map_values<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&V) -> V,
+    {
         for i in 0..self.elts.len() {
             self.elts[i].1 = f(&self.elts[i].1);
         }
     }
 
     /// Modifies this map in place to only contain mappings whose values `v` satisfy `f(v)`.
-    pub fn retain_values<F>(&mut self, mut f: F) where F: FnMut(&V) -> bool {
+    pub fn retain_values<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&V) -> bool,
+    {
         self.elts.retain(|x| f(&x.1));
     }
 
@@ -708,7 +820,6 @@ impl<T: Debug + PrimInt, V: Clone + Debug + PartialEq> RangeMultiMap<T, V> {
         self.elts.iter()
     }
 }
-
 
 impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
     /// Makes the ranges sorted and non-overlapping. The data associated with each range will
@@ -733,7 +844,10 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
         for pair in start_chars.windows(2) {
             ret.push((Range::new(pair[0], pair[1] - T::one()), Vec::new()));
         }
-        ret.push((Range::new(*start_chars.last().unwrap(), T::max_value()), Vec::new()));
+        ret.push((
+            Range::new(*start_chars.last().unwrap(), T::max_value()),
+            Vec::new(),
+        ));
         for &(range, ref val) in self.elts.iter() {
             // The unwrap is OK because start_chars contains range.start for every range in elts.
             let mut idx = start_chars.binary_search(&range.start).unwrap();
@@ -749,14 +863,14 @@ impl<T: Debug + PrimInt, V: Clone + Debug + Ord> RangeMultiMap<T, V> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use num_iter::range_inclusive;
     use num_traits::PrimInt;
+    use quickcheck::{quickcheck, Arbitrary, Gen, TestResult};
     use std::cmp::{max, min};
     use std::fmt::Debug;
     use std::i32;
     use std::ops::Add;
-    use super::*;
-    use quickcheck::{Arbitrary, Gen, TestResult, quickcheck};
 
     impl<T: Arbitrary + Debug + PrimInt> Arbitrary for Range<T> {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
@@ -767,25 +881,31 @@ mod tests {
     }
 
     impl<T> Arbitrary for RangeMultiMap<T, i32>
-    where T: Arbitrary + Debug + PrimInt {
+    where
+        T: Arbitrary + Debug + PrimInt,
+    {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             RangeMultiMap::from_vec(Vec::arbitrary(g))
         }
 
-        fn shrink(&self) -> Box<Iterator<Item=Self>> {
+        fn shrink(&self) -> Box<Iterator<Item = Self>> {
             Box::new(self.elts.shrink().map(|v| RangeMultiMap::from_vec(v)))
         }
     }
 
     impl<T> Arbitrary for RangeMap<T, i32>
-    where T: Arbitrary + Debug + PrimInt {
+    where
+        T: Arbitrary + Debug + PrimInt,
+    {
         fn arbitrary<G: Gen>(g: &mut G) -> Self {
             let map: RangeMap<T, Vec<_>> = RangeMultiMap::arbitrary(g).group();
             // TODO: replace fold with sum once it's stable
-            map.ranges_values().map(|x| (x.0, x.1.iter().fold(0, Add::add))).collect()
+            map.ranges_values()
+                .map(|x| (x.0, x.1.iter().fold(0, Add::add)))
+                .collect()
         }
 
-        fn shrink(&self) -> Box<Iterator<Item=Self>> {
+        fn shrink(&self) -> Box<Iterator<Item = Self>> {
             Box::new(self.elts.shrink().map(|v| RangeMap::from_norm_vec(v)))
         }
     }
@@ -795,7 +915,7 @@ mod tests {
             RangeMap::arbitrary(g).to_range_set()
         }
 
-        fn shrink(&self) -> Box<Iterator<Item=Self>> {
+        fn shrink(&self) -> Box<Iterator<Item = Self>> {
             Box::new(self.map.elts.shrink().map(|v| RangeSet::from_norm_vec(v)))
         }
     }
@@ -843,7 +963,10 @@ mod tests {
     #[test]
     fn rangemap_overlapping() {
         assert_eq!(map(vec![(1, 5, 1), (2, 10, 1)]), map(vec![(1, 10, 1)]));
-        assert_eq!(map(vec![(1, 5, 1), (2, 10, 1), (9, 11, 1)]), map(vec![(1, 11, 1)]));
+        assert_eq!(
+            map(vec![(1, 5, 1), (2, 10, 1), (9, 11, 1)]),
+            map(vec![(1, 11, 1)])
+        );
         map(vec![(1, 5, 1), (6, 10, 2)]);
     }
 
@@ -894,8 +1017,12 @@ mod tests {
                 new_map_norm
             };
 
-            new_map.keys_values().all(|(k, v)| f(map.get(k).unwrap()) == *v)
-                && map.keys_values().all(|(k, v)| *new_map.get(k).unwrap() == f(v))
+            new_map
+                .keys_values()
+                .all(|(k, v)| f(map.get(k).unwrap()) == *v)
+                && map
+                    .keys_values()
+                    .all(|(k, v)| *new_map.get(k).unwrap() == f(v))
                 && new_map == new_map_norm
         }
         quickcheck(prop as fn(_, _) -> _);
@@ -907,7 +1034,9 @@ mod tests {
             let mut new_map = map.clone();
             new_map.retain_values(|v| r.contains(*v));
             new_map.keys_values().all(|(_, v)| r.contains(*v))
-                && map.keys_values().all(|(k, v)| !r.contains(*v) || new_map.get(k).unwrap() == v)
+                && map
+                    .keys_values()
+                    .all(|(k, v)| !r.contains(*v) || new_map.get(k).unwrap() == v)
         }
         quickcheck(prop as fn(_, _) -> _);
     }
@@ -972,7 +1101,7 @@ mod tests {
     fn rangeset_except() {
         fn prop(mut except: Vec<i8>) -> bool {
             except.sort();
-            let set = RangeSet::except(except.iter().cloned());
+            let set = RangeSet::except(except.iter().cloned()).unwrap();
             set.elements().all(|e| except.binary_search(&e).is_err())
                 && except.iter().all(|&e| !set.contains(e))
         }
@@ -980,9 +1109,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn rangeset_except_unsorted() {
-        RangeSet::except([1i32, 3, 2].iter().cloned());
+        assert_eq!(None, RangeSet::except([1i32, 3, 2].iter().cloned()));
     }
 
     // Check that things don't panic when we have MIN and MAX in the ranges (quickcheck doesn't
@@ -993,7 +1121,8 @@ mod tests {
             RangeMultiMap::from_vec(vec![
                 (Range::new(i32::MIN, 200), 5),
                 (Range::new(100, i32::MAX), 10),
-            ]).group(),
+            ])
+            .group(),
             RangeMap::from_sorted_vec(vec![
                 (Range::new(i32::MIN, 99), vec![5]),
                 (Range::new(100, 200), vec![5, 10]),
@@ -1007,14 +1136,11 @@ mod tests {
         fn prop(mm_vec: Vec<(Range<i32>, i32)>) -> bool {
             let mm = RangeMultiMap::from_vec(mm_vec.clone());
             let grouped = mm.group();
-            mm_vec.into_iter()
-                .all(|(range, val)| {
-                    range_inclusive(range.start, range.end).all(|i| {
-                        grouped.get(i).unwrap().contains(&val)
-                    })
-                })
+            mm_vec.into_iter().all(|(range, val)| {
+                range_inclusive(range.start, range.end)
+                    .all(|i| grouped.get(i).unwrap().contains(&val))
+            })
         }
         quickcheck(prop as fn(_) -> _);
     }
 }
-
